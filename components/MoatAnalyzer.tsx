@@ -95,9 +95,27 @@ const MoatAnalyzer: React.FC<Props> = ({ company, analysis }) => {
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} opacity={0.5} />
                 <XAxis dataKey="year" stroke="#64748b" tick={{fontSize: 10}} />
                 <YAxis yAxisId="left" stroke="#94a3b8" tick={{fontSize: 10}} label={{ value: 'Rev ($B)', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 9 }} />
-                <YAxis yAxisId="right" orientation="right" stroke="#eab308" tick={{fontSize: 10}} label={{ value: 'Margin %', angle: 90, position: 'insideRight', fill: '#eab308', fontSize: 9 }} />
+                <YAxis 
+                  yAxisId="right" 
+                  orientation="right" 
+                  stroke="#eab308" 
+                  tick={{fontSize: 10}} 
+                  tickFormatter={(val) => {
+                    const percentage = val < 1 && val !== 0 ? val * 100 : val;
+                    return `${percentage.toFixed(0)}%`;
+                  }}
+                  label={{ value: 'Margin %', angle: 90, position: 'insideRight', fill: '#eab308', fontSize: 9 }} 
+                />
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', color: '#f1f5f9', fontSize: '11px' }}
+                  formatter={(value: any, name: string) => {
+                    if (name === "Net Margin %") {
+                      const percentage = value < 1 && value !== 0 ? value * 100 : value;
+                      return [`${percentage.toFixed(2)}%`, name];
+                    }
+                    if (name === "Revenue ($B)") return [`$${value}B`, name];
+                    return [value, name];
+                  }}
                 />
                 <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '11px' }} />
                 <Bar yAxisId="left" dataKey="revenue" name="Revenue ($B)" fill="#475569" barSize={30} radius={[4, 4, 0, 0]} fillOpacity={0.8} />

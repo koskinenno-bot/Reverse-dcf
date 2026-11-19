@@ -2,6 +2,7 @@
 import React from 'react';
 import { WatchlistItem } from '../types';
 import { X, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { currencySymbol } from '../utils/currency';
 
 interface Props {
   watchlist: WatchlistItem[];
@@ -43,8 +44,11 @@ const WatchlistSidebar: React.FC<Props> = ({ watchlist, activeTicker, onSelect, 
           <div className="divide-y divide-nomad-900/50">
             {watchlist.map((item) => {
               const isActive = activeTicker === item.ticker;
-              const change = item.change || (Math.random() * 4 - 2); // Mock change if not provided
-              const isPositive = change > 0;
+              const change = item.change;
+              const isPositive = (change ?? 0) > 0;
+              const range = item.week52Low && item.week52High && item.week52High > item.week52Low
+                ? Math.min(100, Math.max(0, ((item.price - item.week52Low) / (item.week52High - item.week52Low)) * 100))
+                : null;
               
               return (
                 <div 
@@ -64,30 +68,34 @@ const WatchlistSidebar: React.FC<Props> = ({ watchlist, activeTicker, onSelect, 
                       </span>
                     </div>
                     <div className="flex flex-col items-end">
-                      <span className="text-sm font-mono text-nomad-100">${item.price.toFixed(2)}</span>
-                      <div className={`flex items-center gap-1 text-[10px] font-bold ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-                        {isPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                        <span>{isPositive ? '+' : ''}{change.toFixed(1)}%</span>
-                      </div>
+                      <span className="text-sm font-mono text-nomad-100">{currencySymbol(item.currency)}{item.price.toFixed(2)}</span>
+                      {change !== undefined && (
+                        <div className={`flex items-center gap-1 text-[10px] font-bold ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
+                          {isPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                          <span>{isPositive ? '+' : ''}{change.toFixed(1)}%</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* 52-Week Range Mockup */}
-                  <div className="mt-3 flex flex-col gap-1">
+                  {/* 52-week range: where the price sits between the low and the high */}
+                  {range !== null && (
+                  <div className="mt-3 flex flex-col gap-1" title={`52wk ${item.week52Low!.toFixed(2)} – ${item.week52High!.toFixed(2)}`}>
                     <div className="flex justify-between text-[8px] text-nomad-600 uppercase tracking-tighter">
                       <span>52WK</span>
                       <div className="h-1 w-24 bg-nomad-800 rounded-full relative overflow-hidden">
                         <div 
                           className="absolute h-full bg-nomad-600 rounded-full" 
-                          style={{ left: '20%', width: '60%' }}
+                          style={{ left: 0, width: `${range}%` }}
                         ></div>
                         <div 
                           className="absolute h-2 w-2 bg-yellow-500 rounded-full -top-0.5 border border-nomad-950"
-                          style={{ left: '45%' }}
+                          style={{ left: `calc(${range}% - 4px)` }}
                         ></div>
                       </div>
                     </div>
                   </div>
+                  )}
 
                   <button
                     onClick={(e) => {

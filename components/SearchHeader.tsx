@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LoadingState } from '../types';
+import { searchYahoo, yahooAvailable, SearchHit } from '../services/yahooFinanceService';
 
 interface Props {
   onSearch: (ticker: string) => void;
@@ -9,10 +10,35 @@ interface Props {
 
 const SearchHeader: React.FC<Props> = ({ onSearch, loadingState, compact }) => {
   const [input, setInput] = useState('');
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [open, setOpen] = useState(false);
+
+  // Suggestions by company name or ticker (Yahoo, when the local proxy is running)
+  useEffect(() => {
+    const q = input.trim();
+    if (!yahooAvailable() || q.length < 2) {
+      setHits([]);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      searchYahoo(q)
+        .then((h) => { if (!cancelled) setHits(h.slice(0, 7)); })
+        .catch(() => { if (!cancelled) setHits([]); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [input]);
+
+  const pick = (symbol: string) => {
+    setOpen(false);
+    setInput(symbol);
+    onSearch(symbol);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim()) {
+      setOpen(false);
       onSearch(input.trim());
     }
   };
@@ -31,7 +57,7 @@ const SearchHeader: React.FC<Props> = ({ onSearch, loadingState, compact }) => {
           <>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-nomad-800/50 border border-nomad-700/50 text-[10px] md:text-xs font-medium text-nomad-400 mb-4 md:mb-6 backdrop-blur-sm">
               <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
-              Gemini 3.1 Powered
+              No API keys needed
             </div>
 
             <h1 className="text-3xl md:text-6xl font-serif font-medium text-nomad-50 mb-4 md:mb-6 tracking-tight text-center">
@@ -56,8 +82,11 @@ const SearchHeader: React.FC<Props> = ({ onSearch, loadingState, compact }) => {
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Search Ticker..."
+            onChange={(e) => { setInput(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            autoComplete="off"
+            placeholder={yahooAvailable() ? "Company name or ticker (e.g. Kone, AMZN)..." : "Search Ticker..."}
             className={`relative w-full bg-nomad-800/80 border border-nomad-600 text-nomad-100 rounded-full focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-600 placeholder-nomad-500 transition-all shadow-2xl backdrop-blur-sm ${compact ? 'py-2 px-6 text-sm' : 'py-3 md:py-4 px-6 md:px-8 text-base md:text-lg'}`}
             disabled={isLoading}
           />
@@ -76,6 +105,26 @@ const SearchHeader: React.FC<Props> = ({ onSearch, loadingState, compact }) => {
               </span>
             ) : compact ? 'Search' : 'Analyze'}
           </button>
+          {open && hits.length > 0 && (
+            <ul className="absolute left-0 right-0 top-full mt-2 z-40 bg-nomad-900 border border-nomad-700 rounded-xl shadow-2xl overflow-hidden text-left">
+              {hits.map((h) => (
+                <li key={h.symbol}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pick(h.symbol)}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-nomad-800 transition-colors"
+                  >
+                    <span className="min-w-0 truncate text-sm text-nomad-100">{h.name}</span>
+                    <span className="shrink-0 text-xs font-mono text-yellow-500">
+                      {h.symbol}
+                      <span className="ml-2 text-nomad-500 font-sans">{h.exchange}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </form>
         
         {!compact && (

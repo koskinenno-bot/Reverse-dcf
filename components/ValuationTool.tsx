@@ -1,7 +1,8 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { CompanyData } from '../types';
-import { calculateIntrinsicValue, findImpliedGrowth, calculateScenarioCAGR } from '../utils/math';
+import { calculateIntrinsicValue, findImpliedGrowth, calculateScenarioCAGR, estimateOwnersEarnings, ownersEarningsHistory, historyCagr } from '../utils/math';
+import { currencySymbol } from '../utils/currency';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, CartesianGrid } from 'recharts';
 import OwnersEarningsCalculator from './OwnersEarningsCalculator';
 
@@ -13,14 +14,21 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
   const [discountRate, setDiscountRate] = useState(0.10); // 10% default per Sleep
   const [terminalMultiple, setTerminalMultiple] = useState(15);
   const [holdingPeriod, setHoldingPeriod] = useState(5); // 5 years per quote
-  const [ownersEarnings, setOwnersEarnings] = useState(company.fcfPerShare);
+  const [ownersEarnings, setOwnersEarnings] = useState(() => estimateOwnersEarnings(company));
   const [showCalculator, setShowCalculator] = useState(false);
 
   // Reset state when company changes
   useEffect(() => {
-    setOwnersEarnings(company.fcfPerShare);
+    setOwnersEarnings(estimateOwnersEarnings(company));
     setShowCalculator(false);
   }, [company]);
+
+  const cur = currencySymbol(company.currency);
+  const DCF_YEARS = 10;
+
+  // Historical Owner's Earnings per share (when the data source gives yearly NI, D&A and shares)
+  const oeHistory = useMemo(() => ownersEarningsHistory(company), [company]);
+  const oeCagr = useMemo(() => historyCagr(oeHistory), [oeHistory]);
   
   // Calculate Historical EPS CAGR
   const epsCagr = useMemo(() => {
@@ -55,13 +63,13 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
 
   // Determine max value for the slider
   const sliderMax = useMemo(() => {
-    const base = Math.max(Math.abs(company.eps || 0), Math.abs(company.fcfPerShare || 0), 1);
+    const base = Math.max(Math.abs(company.eps || 0), Math.abs(company.fcfPerShare || 0), Math.abs(estimateOwnersEarnings(company) || 0), 1);
     return Math.ceil(base * 3);
   }, [company]);
 
   // Calculate implied growth based on current price (Reverse DCF)
   const impliedGrowth = useMemo(() => 
-    findImpliedGrowth(company.price, ownersEarnings, discountRate, 10, terminalMultiple),
+    findImpliedGrowth(company.price, ownersEarnings, discountRate, DCF_YEARS, terminalMultiple),
     [company.price, ownersEarnings, discountRate, terminalMultiple]
   );
 
@@ -77,7 +85,7 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
 
     for (let i = start; i <= end; i++) {
       const g = i / 100;
-      const val = calculateIntrinsicValue(ownersEarnings, g, discountRate, 10, terminalMultiple);
+      const val = calculateIntrinsicValue(ownersEarnings, g, discountRate, DCF_YEARS, terminalMultiple);
       data.push({
         growth: i,
         price: val,
@@ -106,12 +114,17 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
   // Nick Sleep logic text
   const sleepVerdict = useMemo(() => {
     if (ownersEarnings <= 0) return "Owner's Earnings must be positive to imply a growth rate in this model.";
+    if (isNaN(impliedGrowth)) {
+      return calculateIntrinsicValue(ownersEarnings, 1.0, discountRate, DCF_YEARS, terminalMultiple) < company.price
+        ? `Even 100% annual growth for ${DCF_YEARS} years doesn't justify this price. Check Owner's Earnings.`
+        : `The price is below what even a 50% annual decline would be worth. Check the data.`;
+    }
     
     const percent = (impliedGrowth * 100).toFixed(1);
     if (impliedGrowth < 0.06) return `At ${percent}%, the market is pricing in modest growth. "If the moat is wide, this is a bargain."`;
     if (impliedGrowth < 0.12) return `At ${percent}%, the price demands solid execution. "Typical for high quality compounders."`;
     return `At ${percent}%, the market expects exceptional growth. "The moat must be widening rapidly to justify this."`;
-  }, [impliedGrowth, ownersEarnings]);
+  }, [impliedGrowth, ownersEarnings, discountRate, terminalMultiple, company.price]);
 
   const getCellColor = (cagr: number) => {
     if (cagr >= 0.20) return 'bg-green-900/40 text-green-400 border-green-800/30 font-medium';
@@ -133,12 +146,30 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
             Valuation & Returns
             </h2>
             <p className="text-nomad-400 text-sm mt-2">
-            Based on Owner's Earnings (FCF), inspired by Nomad Investment Partnership.
+            Based on Owner's Earnings, inspired by Nomad Investment Partnership.
             </p>
         </div>
         
-        {/* EPS CAGR Badge */}
-        <div className="flex items-center">
+        {/* Historical growth badges */}
+        <div className="flex flex-wrap items-stretch gap-3">
+            {oeCagr && (
+                <div className="bg-nomad-900/80 border border-yellow-700/40 rounded-lg p-3 shadow-inner" title={oeHistory.map(r => `${r.year}: ${cur}${r.perShare.toFixed(2)}`).join('\n')}>
+                    <p className="text-[10px] text-yellow-600 uppercase tracking-widest font-bold">
+                        Historical OE Growth
+                    </p>
+                    <div className="flex items-baseline gap-2 mt-1">
+                        <span className={`text-xl font-bold font-mono ${oeCagr.value >= 0.10 ? 'text-green-400' : 'text-nomad-200'}`}>
+                            {(oeCagr.value * 100).toFixed(1)}%
+                        </span>
+                        <span className="text-xs text-nomad-500">
+                             ({oeCagr.years}y CAGR)
+                        </span>
+                    </div>
+                    <p className="text-[10px] text-nomad-500 font-mono mt-1">
+                        {cur}{oeHistory[0].perShare.toFixed(2)} → {cur}{oeHistory[oeHistory.length - 1].perShare.toFixed(2)} / share
+                    </p>
+                </div>
+            )}
             {epsCagr ? (
                 <div className="bg-nomad-900/80 border border-nomad-600 rounded-lg p-3 shadow-inner">
                     <p className="text-[10px] text-nomad-500 uppercase tracking-widest font-bold">
@@ -169,6 +200,7 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
         {/* Calculator Toggle */}
         {showCalculator && (
           <OwnersEarningsCalculator 
+            key={company.ticker}
             company={company} 
             onApply={handleApplyOwnersEarnings} 
             onClose={() => setShowCalculator(false)} 
@@ -191,7 +223,7 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
              </div>
              <div className="flex flex-col gap-2 flex-1 justify-center">
                <div className="relative w-full group">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-yellow-600 font-mono text-base md:text-lg transition-colors group-focus-within:text-yellow-500">$</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-yellow-600 font-mono text-base md:text-lg transition-colors group-focus-within:text-yellow-500">{cur.trim()}</span>
                   <input
                     type="number"
                     value={ownersEarnings}
@@ -282,6 +314,10 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
                <p className="text-nomad-300 italic text-xs md:text-sm border-l-2 border-yellow-600 pl-4 py-1">
                  {sleepVerdict}
                </p>
+               <p className="text-[10px] text-nomad-500 mt-3">
+                 Growth of Owner's Earnings for {DCF_YEARS} years, then valued at {terminalMultiple}x, discounted at {Math.round(discountRate * 100)}%.
+                 {oeCagr && <> Historically: <span className="text-nomad-300">{(oeCagr.value * 100).toFixed(1)}% / yr</span> ({oeCagr.startYear}–{oeCagr.endYear}).</>}
+               </p>
              </div>
 
              <div className="h-48 md:h-64 w-full">
@@ -293,7 +329,7 @@ const ValuationTool: React.FC<Props> = ({ company }) => {
                    <Tooltip 
                      cursor={{ stroke: '#64748b', strokeWidth: 1, strokeDasharray: '3 3' }}
                      contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', color: '#e2e8f0', fontSize: '12px', borderRadius: '0.5rem', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
-                     formatter={(value: number) => [`$${value.toFixed(2)}`, 'Intrinsic Value']}
+                     formatter={(value: number) => [`${cur}${value.toFixed(2)}`, 'Intrinsic Value']}
                      labelFormatter={(label) => `Growth: ${label}%`}
                    />
                    <ReferenceLine y={company.price} stroke="#eab308" strokeDasharray="3 3" label={{ value: 'Current Price', fill: '#eab308', fontSize: 10, position: 'insideTopLeft' }} />

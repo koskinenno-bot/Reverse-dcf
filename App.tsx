@@ -15,27 +15,75 @@ import KpiDashboard from './components/KpiDashboard';
 import NomadWisdom from './components/NomadWisdom';
 import WatchlistSidebar from './components/WatchlistSidebar';
 import { WatchlistItem } from './types';
+import ErrorBoundary from './components/ErrorBoundary';
+import { fetchYahooQuote, yahooAvailable } from './services/yahooFinanceService';
+import { localAiAvailable } from './services/localAiService';
+import { currencySymbol } from './utils/currency';
 
 const App: React.FC = () => {
+  const [apiKey, setApiKey] = useState<string>('');
+  const [fmpKey, setFmpKey] = useState<string>('');
   const [loadingState, setLoadingState] = useState<LoadingState>(LoadingState.IDLE);
   const [company, setCompany] = useState<CompanyData | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Check for watchlist on mount
+  // Check for key and watchlist on mount
   useEffect(() => {
+    const storedKey = localStorage.getItem('gemini_api_key');
+    const storedFmpKey = localStorage.getItem('fmp_api_key');
+    const envKey = process.env.API_KEY;
     const storedWatchlist = localStorage.getItem('nomad_watchlist_v2');
     
+    if (storedKey) setApiKey(storedKey);
+    else if (envKey) setApiKey(envKey);
+    if (storedFmpKey) setFmpKey(storedFmpKey);
+
     if (storedWatchlist) {
       try {
-        setWatchlist(JSON.parse(storedWatchlist));
+        // Older versions stored a random "change"; drop it and refresh real quotes below.
+        const items: WatchlistItem[] = JSON.parse(storedWatchlist).map((i: WatchlistItem) => ({ ...i, change: undefined }));
+        setWatchlist(items);
+        if (yahooAvailable()) refreshQuotes(items);
       } catch (e) {
         console.error("Failed to parse watchlist", e);
       }
     }
   }, []);
+
+  const refreshQuotes = async (items: WatchlistItem[]) => {
+    const fresh = await Promise.all(items.map(async (item) => {
+      try {
+        const q = await fetchYahooQuote(item.ticker);
+        if (!q) return item;
+        return { ...item, price: q.price, currency: q.currency, change: q.changePct, week52Low: q.week52Low, week52High: q.week52High };
+      } catch {
+        return item;
+      }
+    }));
+    setWatchlist(fresh);
+    localStorage.setItem('nomad_watchlist_v2', JSON.stringify(fresh));
+  };
+
+  const handleSaveKey = (key: string, fmp: string) => {
+    localStorage.setItem('gemini_api_key', key);
+    if (fmp) localStorage.setItem('fmp_api_key', fmp);
+    setApiKey(key);
+    setFmpKey(fmp);
+  };
+
+  const clearKey = () => {
+    localStorage.removeItem('gemini_api_key');
+    localStorage.removeItem('fmp_api_key');
+    setApiKey('');
+    setFmpKey('');
+    setCompany(null);
+    setAnalysis(null);
+    setError(null);
+  };
 
   const addToWatchlist = (comp: CompanyData) => {
     if (!watchlist.find(item => item.ticker === comp.ticker)) {
@@ -43,7 +91,10 @@ const App: React.FC = () => {
         ticker: comp.ticker,
         name: comp.name,
         price: comp.price,
-        change: (Math.random() * 4 - 2) // Mock change
+        currency: comp.currency,
+        change: comp.dayChangePct,
+        week52Low: comp.week52Low,
+        week52High: comp.week52High,
       };
       const updated = [newItem, ...watchlist];
       setWatchlist(updated);
@@ -57,24 +108,38 @@ const App: React.FC = () => {
     localStorage.setItem('nomad_watchlist_v2', JSON.stringify(updated));
   };
 
+  // AI analyses: a Gemini key if one was saved earlier, otherwise the Claude installed
+  // on this computer (through the launcher). Neither → data and valuation only.
+  const [localAi, setLocalAi] = useState(false);
+  useEffect(() => { localAiAvailable().then(setLocalAi); }, []);
+  const geminiKey = !!(apiKey || process.env.API_KEY);
+  const aiEnabled = geminiKey || localAi;
+
   const handleSearch = async (ticker: string) => {
     setIsMobileMenuOpen(false); // Close menu on search
     setLoadingState(LoadingState.SEARCHING);
     setError(null);
+    setAiError(null);
     setCompany(null);
     setAnalysis(null);
 
-    // Start both requests in parallel to improve speed
-    const financialPromise = fetchCompanyFinancials(ticker);
-    const analysisPromise = analyzeMoatRobustness(ticker, ticker);
-
     try {
-      const financialData = await financialPromise;
+      const financialData = await fetchCompanyFinancials(ticker, apiKey, fmpKey);
       setCompany(financialData);
+      if (!aiEnabled) {
+        setLoadingState(LoadingState.COMPLETE);
+        return;
+      }
       setLoadingState(LoadingState.ANALYZING);
-      
-      const analysisData = await analysisPromise;
-      setAnalysis(analysisData);
+
+      // The analysis failing must not hide the numbers.
+      try {
+        // Resolved ticker and name ("kone" → KNEBV.HE, KONE Oyj)
+        setAnalysis(await analyzeMoatRobustness(financialData.ticker, financialData.name, apiKey, geminiKey ? 'gemini' : 'local'));
+      } catch (aiErr: any) {
+        console.error(aiErr);
+        setAiError(aiErr?.message || "AI analysis failed.");
+      }
       setLoadingState(LoadingState.COMPLETE);
     } catch (err: any) {
       console.error(err);
@@ -88,6 +153,7 @@ const App: React.FC = () => {
       setLoadingState(LoadingState.ERROR);
     }
   };
+
 
   return (
     <div className="flex min-h-screen bg-nomad-950 selection:bg-yellow-500/30 selection:text-yellow-100 relative overflow-x-hidden">
@@ -140,6 +206,12 @@ const App: React.FC = () => {
                  <div className="text-4xl mb-2">⚠️</div>
                  <h3 className="text-xl font-serif text-white">Analysis Failed</h3>
                  <p className="text-lg font-light opacity-90 leading-relaxed">{error}</p>
+                 {apiKey && <button 
+                   onClick={clearKey}
+                   className="mt-4 bg-red-900/50 hover:bg-red-800/50 text-white px-6 py-3 rounded-lg border border-red-700 transition-all text-sm font-bold uppercase tracking-wider hover:scale-105"
+                 >
+                   Change API Key
+                 </button>}
               </div>
             </div>
           )}
@@ -165,7 +237,7 @@ const App: React.FC = () => {
                   </h1>
                   <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-2">
                       <span className="text-lg md:text-xl text-nomad-400 font-sans font-medium">{company.ticker}</span>
-                      <span className="px-2 py-1 rounded bg-nomad-800 text-[10px] md:text-xs text-nomad-300 border border-nomad-700">${company.price.toFixed(2)}</span>
+                      <span className="px-2 py-1 rounded bg-nomad-800 text-[10px] md:text-xs text-nomad-300 border border-nomad-700">{currencySymbol(company.currency)}{company.price.toFixed(2)}</span>
                       
                       {/* Add to Watchlist Button */}
                       <button 
@@ -180,21 +252,27 @@ const App: React.FC = () => {
                 </div>
                 <div className="flex justify-between items-center md:block bg-nomad-900/50 p-3 md:p-4 rounded-lg border border-nomad-800 md:text-right">
                   <p className="text-nomad-50 text-[10px] uppercase tracking-widest font-bold md:text-nomad-500">TTM EPS</p>
-                  <p className="text-nomad-200 font-mono text-lg md:text-xl">${company.eps}</p>
+                  <p className="text-nomad-200 font-mono text-lg md:text-xl">{currencySymbol(company.currency)}{company.eps}</p>
                 </div>
               </div>
 
-              {/* Tools */}
+              {/* Tools Section */}
               <div className="grid grid-cols-1 gap-16">
-                <section>
-                  <ValuationTool company={company} />
-                </section>
+                <ErrorBoundary name="Valuation Tools">
+                  <section>
+                    <ValuationTool company={company} />
+                  </section>
+                </ErrorBoundary>
 
-                <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-100">
-                  <DestinationAnalysis company={company} suggestions={analysis?.destinationSuggestions} />
-                </section>
+                <ErrorBoundary name="Destination Analysis">
+                  <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-100">
+                    <DestinationAnalysis company={company} suggestions={analysis?.destinationSuggestions} />
+                  </section>
+                </ErrorBoundary>
 
-                {/* Skeleton Loading for Analysis */}
+                {loadingState === LoadingState.ANALYZING && !analysis && !geminiKey && (
+                  <p className="text-center text-sm text-nomad-400">Claude is researching the company on the web. This takes 1–2 minutes…</p>
+                )}
                 {loadingState === LoadingState.ANALYZING && !analysis && (
                   <div className="space-y-8 animate-pulse">
                     <div className="h-80 bg-nomad-800 rounded-xl border border-nomad-700/50"></div>
@@ -205,54 +283,66 @@ const App: React.FC = () => {
                   </div>
                 )}
 
+                {aiError && !analysis && (
+                  <div className="bg-nomad-900/60 border border-nomad-700 rounded-xl p-5 text-sm text-nomad-400">
+                    AI analysis unavailable: {aiError}
+                  </div>
+                )}
+
                 {analysis && (
-                  <>
-                    <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-200 grid grid-cols-1 lg:grid-cols-3 gap-8">
-                      <div className="lg:col-span-2">
-                        <MoatAnalyzer company={company} analysis={analysis} />
-                      </div>
-                      <div className="lg:col-span-1">
-                        <ManagementAnalysis analysis={analysis} />
-                      </div>
-                    </section>
+                  <ErrorBoundary name="Deep Analysis">
+                    <div className="space-y-16">
+                      <ErrorBoundary name="Moat Analysis">
+                        <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                           <div className="lg:col-span-2">
+                              <MoatAnalyzer company={company} analysis={analysis} />
+                           </div>
+                           <div className="lg:col-span-1">
+                              <ManagementAnalysis analysis={analysis} />
+                           </div>
+                        </section>
+                      </ErrorBoundary>
 
-                    {/* KPI Section */}
-                    {analysis.kpis && analysis.kpis.length > 0 && (
-                      <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-250">
-                        <KpiDashboard kpis={analysis.kpis} />
+                      {analysis.kpis && analysis.kpis.length > 0 && (
+                        <ErrorBoundary name="KPI Dashboard">
+                          <section>
+                            <KpiDashboard kpis={analysis.kpis} />
+                          </section>
+                        </ErrorBoundary>
+                      )}
+
+                      {analysis.capitalAllocation && analysis.capitalAllocation.length > 0 && (
+                        <ErrorBoundary name="Capital Allocation">
+                          <section>
+                            <CapitalAllocation data={analysis.capitalAllocation} />
+                          </section>
+                        </ErrorBoundary>
+                      )}
+
+                      <ErrorBoundary name="Nomad Checklist">
+                        <section>
+                          <NomadChecklist company={company} analysis={analysis} />
+                        </section>
+                      </ErrorBoundary>
+
+                      <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <div className="lg:col-span-1">
+                            {analysis.investorPresentation && (
+                            <PresentationCard 
+                                title={analysis.investorPresentation.title} 
+                                url={analysis.investorPresentation.url} 
+                            />
+                            )}
+                        </div>
+                        
+                        <div className="lg:col-span-2">
+                            {analysis.news && analysis.news.length > 0 && (
+                            <NewsFeed news={analysis.news} ticker={company.ticker} />
+                            )}
+                        </div>
                       </section>
-                    )}
-
-                    {/* Capital Allocation Section */}
-                    {analysis.capitalAllocation && analysis.capitalAllocation.length > 0 && (
-                      <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-275">
-                        <CapitalAllocation data={analysis.capitalAllocation} />
-                      </section>
-                    )}
-
-                    {/* Nomad Checklist Section */}
-                    <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-285">
-                      <NomadChecklist company={company} analysis={analysis} />
-                    </section>
-
-                    {/* Investor Presentation & News Section */}
-                    <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-300 grid grid-cols-1 lg:grid-cols-3 gap-8">
-                      <div className="lg:col-span-1">
-                          {analysis.investorPresentation && (
-                          <PresentationCard 
-                              title={analysis.investorPresentation.title} 
-                              url={analysis.investorPresentation.url} 
-                          />
-                          )}
-                      </div>
-                      
-                      <div className="lg:col-span-2">
-                          {analysis.news && analysis.news.length > 0 && (
-                          <NewsFeed news={analysis.news} ticker={company.ticker} />
-                          )}
-                      </div>
-                    </section>
-                  </>
+                    </div>
+                  </ErrorBoundary>
                 )}
               </div>
             </div>
@@ -263,7 +353,12 @@ const App: React.FC = () => {
         
         <footer className="mt-32 py-12 text-center border-t border-nomad-900 bg-nomad-950">
           <p className="text-nomad-500 text-sm">Inspired by the letters of the Nomad Investment Partnership (Nick Sleep & Qais Zakaria).</p>
-          <p className="mt-2 text-xs text-nomad-600">Data generated via Gemini 3.1 Pro. Use for educational purposes only.</p>
+          <p className="mt-2 text-xs text-nomad-600">Financial data from Yahoo Finance. Use for educational purposes only.</p>
+          {apiKey && (
+            <button onClick={clearKey} className="mt-6 text-xs text-nomad-600 hover:text-yellow-500 transition-colors underline">
+              Remove API Key
+            </button>
+          )}
         </footer>
       </div>
     </div>

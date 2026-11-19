@@ -1,0 +1,86 @@
+{{TODAY}}
+
+Search the web to analyze {{NAME}} ({{TICKER}}) for an investment research report.
+
+INSTRUCTIONS:
+1. Primary Competitive Advantage (Moat):
+   - Identify: "Scale Economics Shared", "Network Effects", "Switching Costs", "Intangible Assets", "Cost Advantage", or "Efficient Scale"
+   - Deep analysis of how the moat works specifically for this company
+   - Moat Score 1-10 (10 = Unassailable)
+
+2. Moat Verdict (Morningstar style):
+   - "Wide", "Narrow", or "None"
+   - Detailed explanation
+
+3. Recent News (SEARCH for the last 30 days):
+   - 2-3 headlines with source and "Signal"/"Noise" verdict.
+
+4. Investor Presentation: Latest slides URL.
+
+5. Key Performance Indicators (KPIs): 2-3 business KPIs for last 3 years.
+
+6. Management Quality (Nick Sleep style): Score 1-10, Verdict, and 3 traits.
+
+7. Capital Allocation (last 3 years): CapEx, R&D, Buybacks (in MILLIONS of the company's reporting currency).
+
+8. Destination Analysis: 3 scenarios (Conservative, Base, Optimistic) with CAGR and reasoning.
+
+Return ONLY a valid JSON object. No markdown, no fences:
+{
+  "summary": "Executive summary of business quality.",
+  "moatScore": 8,
+  "competitiveAdvantageAnalysis": "Deep analysis of the moat...",
+  "moatVerdict": "Wide",
+  "moatSource": "Cost Advantage",
+  "moatDescription": "Why the moat is wide/narrow...",
+  "news": [
+    {
+      "title": "Headline",
+      "date": "YYYY-MM-DD",
+      "source": "Reuters",
+      "category": "Signal",
+      "reasoning": "Why this is a signal or noise."
+    }
+  ],
+  "investorPresentation": {
+    "title": "Q4 {{LASTYEAR}} Earnings Slides",
+    "url": "https://..."
+  },
+  "kpis": [
+    {
+      "title": "KPI Name",
+      "unit": "Millions",
+      "description": "What this KPI measures",
+      "data": [
+        {"year": "2021", "value": 203.6},
+        {"year": "2022", "value": 221.8}
+      ]
+    }
+  ],
+  "managementAnalysis": {
+    "score": 8,
+    "verdict": "Long-term",
+    "details": "Analysis of management quality...",
+    "traits": ["Customer Focused", "Capital Discipline", "Long-term Horizon"]
+  },
+  "capitalAllocation": [
+    {
+      "year": "2022",
+      "capex": 10200,
+      "rd": 5000,
+      "dividends": 2100,
+      "buybacks": 3000,
+      "revenue": 100000,
+      "marketCap": 500000,
+      "reinvestment": 15200,
+      "payout": 5100
+    }
+  ],
+  "destinationSuggestions": [
+    {"scenario": "Conservative", "growthRate": 5, "terminalMultiple": 15, "reasoning": "..."},
+    {"scenario": "Base", "growthRate": 10, "terminalMultiple": 20, "reasoning": "..."},
+    {"scenario": "Optimistic", "growthRate": 15, "terminalMultiple": 25, "reasoning": "..."}
+  ]
+}
+
+Answer with that JSON object only: no text before or after it, no markdown fences, plain numbers.

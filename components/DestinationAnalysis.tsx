@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { CompanyData, DestinationSuggestion } from '../types';
+import { currencySymbol } from '../utils/currency';
 
 interface Props {
   company: CompanyData;
@@ -8,21 +9,35 @@ interface Props {
 }
 
 const DestinationAnalysis: React.FC<Props> = ({ company, suggestions }) => {
+  const cur = currencySymbol(company.currency).trim();
+  const latestFinancial = company.financials?.[company.financials.length - 1];
+  
   // Nick Sleep's Destination Analysis focuses on the 10-year end state
-  const [revGrowth, setRevGrowth] = useState(0.15); // 15% CAGR
-  const [targetMargin, setTargetMargin] = useState(company.financials?.[0]?.netMargin || 15);
+  const [revGrowth, setRevGrowth] = useState(company.revenueGrowth5Y || 0.15); 
+  // Ensure targetMargin is a percentage (e.g. 20 instead of 0.2)
+  const [targetMargin, setTargetMargin] = useState(() => {
+    const rawMargin = latestFinancial?.netMargin || 15;
+    return rawMargin < 1 ? rawMargin * 100 : rawMargin;
+  });
   const [targetMultiple, setTargetMultiple] = useState(20);
   const [shareReduction, setShareReduction] = useState(0.01); // 1% annual buyback
   const [years, setYears] = useState(10);
   
   // Manual Revenue Override
-  const initialRev = company.financials?.[company.financials.length - 1]?.revenue || 10;
+  const initialRev = latestFinancial?.revenue || 1000;
   const [currentRev, setCurrentRev] = useState(initialRev);
 
-  // Update currentRev when company changes
+  // Update when company changes
   React.useEffect(() => {
-    setCurrentRev(initialRev);
-  }, [initialRev]);
+    const freshLatest = company.financials?.[company.financials.length - 1];
+    const freshRev = freshLatest?.revenue || 1000;
+    const freshMargin = freshLatest?.netMargin || 15;
+    const freshGrowth = company.revenueGrowth5Y || 0.15;
+    
+    setCurrentRev(freshRev);
+    setTargetMargin(freshMargin < 1 ? freshMargin * 100 : freshMargin);
+    setRevGrowth(freshGrowth);
+  }, [company]);
 
   const applySuggestion = (s: DestinationSuggestion) => {
     setRevGrowth(s.growthRate / 100);
@@ -100,11 +115,11 @@ const DestinationAnalysis: React.FC<Props> = ({ company, suggestions }) => {
             {/* Current Revenue Input */}
             <div className="bg-nomad-900/40 p-4 rounded-lg border border-nomad-700/50 group focus-within:border-yellow-500/50 transition-colors">
               <div className="flex justify-between mb-2">
-                <label className="text-xs uppercase tracking-widest text-nomad-500 font-bold">Current Revenue ($B)</label>
+                <label className="text-xs uppercase tracking-widest text-nomad-500 font-bold">Current Revenue ({cur}M)</label>
                 <span className="text-[10px] text-nomad-600 font-mono">Manual Entry</span>
               </div>
               <div className="flex items-center">
-                <span className="text-nomad-600 mr-2 font-mono text-lg">$</span>
+                <span className="text-nomad-600 mr-2 font-mono text-lg">{cur}</span>
                 <input 
                   type="number" 
                   value={currentRev} 
@@ -176,12 +191,12 @@ const DestinationAnalysis: React.FC<Props> = ({ company, suggestions }) => {
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-nomad-800 p-5 rounded-xl border border-nomad-700 shadow-inner">
               <span className="text-[10px] uppercase text-nomad-500 font-bold tracking-widest">Future Revenue</span>
-              <div className="text-2xl text-white font-serif mt-1">${results.futureRev.toFixed(1)}B</div>
+              <div className="text-2xl text-white font-serif mt-1">{cur}{results.futureRev.toLocaleString(undefined, { maximumFractionDigits: 0 })}M</div>
               <div className="text-[10px] text-nomad-500 mt-1">In {years} Years</div>
             </div>
             <div className="bg-nomad-800 p-5 rounded-xl border border-nomad-700 shadow-inner">
               <span className="text-[10px] uppercase text-nomad-500 font-bold tracking-widest">Future Net Income</span>
-              <div className="text-2xl text-white font-serif mt-1">${results.futureNetIncome.toFixed(1)}B</div>
+              <div className="text-2xl text-white font-serif mt-1">{cur}{results.futureNetIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}M</div>
               <div className="text-[10px] text-nomad-500 mt-1">At {targetMargin}% Margin</div>
             </div>
           </div>
@@ -197,18 +212,18 @@ const DestinationAnalysis: React.FC<Props> = ({ company, suggestions }) => {
             <div className="mt-8 grid grid-cols-2 w-full gap-8 border-t border-nomad-800 pt-8">
               <div className="text-center">
                 <span className="text-[10px] uppercase text-nomad-500 font-bold tracking-widest block mb-1">Future EPS</span>
-                <span className="text-xl text-nomad-100 font-mono">${results.futureEPS.toFixed(2)}</span>
+                <span className="text-xl text-nomad-100 font-mono">{cur}{results.futureEPS.toFixed(2)}</span>
               </div>
               <div className="text-center">
                 <span className="text-[10px] uppercase text-nomad-500 font-bold tracking-widest block mb-1">Future Price</span>
-                <span className="text-xl text-nomad-100 font-mono">${results.futurePrice.toFixed(2)}</span>
+                <span className="text-xl text-nomad-100 font-mono">{cur}{results.futurePrice.toFixed(2)}</span>
               </div>
             </div>
           </div>
 
           <div className="text-center">
             <p className="text-xs text-nomad-500">
-              Current Price: <span className="text-nomad-300 font-mono">${company.price.toFixed(2)}</span> • 
+              Current Price: <span className="text-nomad-300 font-mono">{cur}{company.price.toFixed(2)}</span> • 
               Exit Multiple: <span className="text-nomad-300 font-mono">{targetMultiple}x</span> • 
               Horizon: <span className="text-nomad-300 font-mono">{years} Years</span>
             </p>

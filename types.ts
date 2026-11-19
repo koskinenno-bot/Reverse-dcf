@@ -3,35 +3,46 @@ export interface WatchlistItem {
   ticker: string;
   name: string;
   price: number;
-  change?: number;
+  change?: number; // % change on the last trading day (Yahoo only)
+  currency?: string;
+  week52Low?: number;
+  week52High?: number;
 }
 
 export interface CompanyData {
   ticker: string;
   name: string;
-  dataSourceQuarter?: string; // e.g. "Q1 2026"
   price: number;
   eps: number;
   fcfPerShare: number;
   revenueGrowth5Y: number; // Average annualized
   currentPe: number;
   description: string;
-  sharesOutstanding: number; // in Billions
+  sharesOutstanding: number; // in Millions ($M)
+  currency?: string; // reporting currency (Yahoo); "$" assumed when missing
+  dayChangePct?: number;
+  week52Low?: number;
+  week52High?: number;
   financials: {
     year: string;
-    revenue: number;
+    revenue: number; // in Millions ($M)
     netMargin: number;
     eps: number; // Added EPS history
-    changeInWorkingCapital?: number; // Added for normalization
+    changeInWorkingCapital?: number; // in Millions ($M)
+    capex?: number; // in Millions ($M)
+    netIncome?: number; // in Millions — lets us compute historical owner earnings
+    depreciation?: number; // in Millions
+    shares?: number; // diluted average, in Millions
   }[];
   ttmFinancials: {
-    netIncome: number;
-    depreciation: number;
-    stockBasedCompensation: number;
-    changeInWorkingCapital: number;
-    normalizedWorkingCapital?: number; // 5-10 year average
-    capitalExpenditures: number;
-    suggestedMaintenanceCapexPct?: number; // AI estimated percentage
+    netIncome: number; // in Millions ($M)
+    depreciation: number; // in Millions ($M)
+    stockBasedCompensation: number; // in Millions ($M)
+    changeInWorkingCapital: number; // in Millions ($M)
+    normalizedWorkingCapital?: number; // in Millions ($M)
+    normalizedCapex?: number; // in Millions ($M)
+    capitalExpenditures: number; // in Millions ($M)
+    suggestedMaintenanceCapexPct?: number; 
   };
 }
 

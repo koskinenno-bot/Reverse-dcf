@@ -1,6 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { CompanyData } from '../types';
+import { defaultMaintenancePct } from '../utils/math';
+import { currencySymbol } from '../utils/currency';
 
 interface Props {
   company: CompanyData;
@@ -9,17 +11,24 @@ interface Props {
 }
 
 const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }) => {
-  // State for inputs (in Billions)
+  // Use normalized values as defaults if available
+  const initialWC = company.ttmFinancials?.normalizedWorkingCapital ?? company.ttmFinancials?.changeInWorkingCapital ?? 0;
+  const initialCapex = company.ttmFinancials?.normalizedCapex ?? company.ttmFinancials?.capitalExpenditures ?? 0;
+
+  // State for inputs (in Millions)
   const [netIncome, setNetIncome] = useState(company.ttmFinancials?.netIncome || 0);
   const [depreciation, setDepreciation] = useState(company.ttmFinancials?.depreciation || 0);
   const [sbc, setSbc] = useState(company.ttmFinancials?.stockBasedCompensation || 0);
-  const [capex, setCapex] = useState(company.ttmFinancials?.capitalExpenditures || 0);
-  const [workingCapital, setWorkingCapital] = useState(company.ttmFinancials?.changeInWorkingCapital || 0);
-  const [useNormalizedWC, setUseNormalizedWC] = useState(false);
-  const [maintenancePct, setMaintenancePct] = useState(100); // Default to 100% of CapEx
+  const [capex, setCapex] = useState(initialCapex);
+  const [workingCapital, setWorkingCapital] = useState(initialWC);
+  const [useNormalizedWC, setUseNormalizedWC] = useState(true); // Default to normalized
+  const [useNormalizedCapex, setUseNormalizedCapex] = useState(true); // Track if using average
+  const [maintenancePct, setMaintenancePct] = useState(() => defaultMaintenancePct(company)); // Suggested %, else D&A / CapEx
   const [shares, setShares] = useState(company.sharesOutstanding || 1);
 
+  const cur = currencySymbol(company.currency).trim();
   const normalizedWC = company.ttmFinancials?.normalizedWorkingCapital;
+  const normalizedCapex = company.ttmFinancials?.normalizedCapex;
 
   // Suggested Maintenance CapEx (from AI)
   const suggestedPct = company.ttmFinancials?.suggestedMaintenanceCapexPct;
@@ -28,6 +37,7 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
 
   // Derived values
   const currentWC = useNormalizedWC && normalizedWC !== undefined ? normalizedWC : workingCapital;
+  // If user changes the input manually, we'll stop calling it "normalized"
   const maintenanceCapex = (capex * (maintenancePct / 100));
   
   // Intermediate: Cash Flow from Operations (Approx)
@@ -38,6 +48,7 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
   // Subtract SBC again because we treat it as a real expense (dilution)
   const ownersEarningsTotal = cashFlowFromOps - maintenanceCapex - sbc;
   
+  // Math check: Millions / Millions = Per Share (dollars)
   const ownersEarningsPerShare = shares > 0 ? ownersEarningsTotal / shares : 0;
 
   return (
@@ -70,22 +81,22 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-nomad-800/50 p-3 md:p-4 rounded-lg border border-nomad-700/50 hover:border-nomad-600 transition-colors group">
-              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 mb-1 md:mb-2 group-focus-within:text-yellow-500">Net Income ($B)</label>
+              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 mb-1 md:mb-2 group-focus-within:text-yellow-500">Net Income ({cur}M)</label>
               <input 
                 type="number" 
-                value={netIncome} 
-                onChange={(e) => setNetIncome(parseFloat(e.target.value))}
+                value={netIncome.toFixed(0)} 
+                onChange={(e) => setNetIncome(parseFloat(e.target.value) || 0)}
                 className="w-full bg-transparent text-lg md:text-xl text-nomad-100 font-mono focus:outline-none" 
               />
             </div>
             <div className="bg-nomad-800/50 p-3 md:p-4 rounded-lg border border-nomad-700/50 hover:border-nomad-600 transition-colors group">
-              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 mb-1 md:mb-2 group-focus-within:text-yellow-500">Shares (B)</label>
+              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 mb-1 md:mb-2 group-focus-within:text-yellow-500">Shares (M)</label>
               <div className="flex items-center">
                 <span className="text-nomad-600 mr-2">/</span>
                 <input 
                   type="number" 
-                  value={shares} 
-                  onChange={(e) => setShares(parseFloat(e.target.value))}
+                  value={shares.toFixed(0)} 
+                  onChange={(e) => setShares(parseFloat(e.target.value) || 1)}
                   className="w-full bg-transparent text-lg md:text-xl text-nomad-100 font-mono focus:outline-none" 
                 />
               </div>
@@ -94,25 +105,25 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-nomad-800/50 p-3 md:p-4 rounded-lg border border-nomad-700/50 hover:border-nomad-600 transition-colors group">
-              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 mb-1 md:mb-2 group-focus-within:text-green-500">D&A ($B)</label>
+              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 mb-1 md:mb-2 group-focus-within:text-green-500">D&A ({cur}M)</label>
               <div className="flex items-center">
                 <span className="text-green-500/70 mr-2">+</span>
                 <input 
                   type="number" 
-                  value={depreciation} 
-                  onChange={(e) => setDepreciation(parseFloat(e.target.value))}
+                  value={depreciation.toFixed(0)} 
+                  onChange={(e) => setDepreciation(parseFloat(e.target.value) || 0)}
                   className="w-full bg-transparent text-lg md:text-xl text-nomad-100 font-mono focus:outline-none" 
                 />
               </div>
             </div>
              <div className="bg-nomad-800/50 p-3 md:p-4 rounded-lg border border-nomad-700/50 hover:border-nomad-600 transition-colors group">
-              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 mb-1 md:mb-2 group-focus-within:text-green-500">Stock Comp ($B)</label>
+              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 mb-1 md:mb-2 group-focus-within:text-green-500">Stock Comp ({cur}M)</label>
               <div className="flex items-center">
                 <span className="text-green-500/70 mr-2">+</span>
                 <input 
                   type="number" 
-                  value={sbc} 
-                  onChange={(e) => setSbc(parseFloat(e.target.value))}
+                  value={sbc.toFixed(0)} 
+                  onChange={(e) => setSbc(parseFloat(e.target.value) || 0)}
                   className="w-full bg-transparent text-lg md:text-xl text-nomad-100 font-mono focus:outline-none" 
                 />
               </div>
@@ -121,7 +132,7 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
 
           <div className="bg-nomad-800/50 p-3 md:p-4 rounded-lg border border-nomad-700/50 hover:border-nomad-600 transition-colors group relative">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-2">
-              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 group-focus-within:text-yellow-500">Change in Working Cap ($B)</label>
+              <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500 group-focus-within:text-yellow-500">Change in Working Cap ({cur}M)</label>
               {normalizedWC !== undefined && (
                 <button 
                   onClick={() => setUseNormalizedWC(!useNormalizedWC)}
@@ -131,7 +142,7 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
                     : 'bg-nomad-900/50 text-nomad-400 border-nomad-700 hover:border-nomad-500'
                   }`}
                 >
-                  {useNormalizedWC ? 'Using Normalized' : 'Normalize (5-10y)'}
+                  {useNormalizedWC ? 'Using 5Y Average' : 'Normalize (5Y)'}
                 </button>
               )}
             </div>
@@ -139,37 +150,38 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
                 <span className="text-nomad-600 mr-2">±</span>
               <input 
                 type="number" 
-                value={currentWC} 
+                value={currentWC.toFixed(0)} 
                 onChange={(e) => {
-                  setWorkingCapital(parseFloat(e.target.value));
+                  setWorkingCapital(parseFloat(e.target.value) || 0);
                   setUseNormalizedWC(false);
                 }}
                 className={`w-full bg-transparent text-lg md:text-xl font-mono focus:outline-none transition-colors ${useNormalizedWC ? 'text-yellow-500' : 'text-nomad-100'}`} 
               />
-            </div>
-            {useNormalizedWC && (
+            </div>            {useNormalizedWC && (
               <div className="mt-4 space-y-2">
-                <div className="text-[9px] md:text-[10px] text-yellow-600 font-bold uppercase tracking-wider">Historical ΔWC ($B)</div>
+                <div className="text-[9px] md:text-[10px] text-yellow-600 font-bold uppercase tracking-wider">Historical ΔWC ({cur}M)</div>
                 <div className="flex gap-1 items-end h-10 md:h-12 bg-nomad-900/30 rounded p-1">
-                  {company.financials?.filter(f => f.changeInWorkingCapital !== undefined).map((f, idx) => {
-                    const val = f.changeInWorkingCapital || 0;
-                    const max = Math.max(...(company.financials?.map(x => Math.abs(x.changeInWorkingCapital || 0)) || [1]));
+                  {company.financials?.map((f, idx) => {
+                    const val = (f.changeInWorkingCapital || 0);
+                    // Scale relative to the max absolute value in the historical range
+                    const allVals = company.financials?.map(x => Math.abs((x.changeInWorkingCapital || 0))) || [1];
+                    const max = Math.max(...allVals, 1);
                     const height = (Math.abs(val) / max) * 100;
                     return (
-                      <div key={idx} className="flex-1 flex flex-col items-center group relative">
+                      <div key={idx} className="flex-1 h-full flex flex-col justify-end items-center group relative" title={`${f.year}`}>
                         <div 
-                          className={`w-full rounded-t-sm transition-all ${val >= 0 ? 'bg-green-500/40' : 'bg-red-500/40'}`}
-                          style={{ height: `${height}%` }}
+                          className={`w-full rounded-t-sm transition-all ${val >= 0 ? 'bg-green-500/60 hover:bg-green-400' : 'bg-red-500/60 hover:bg-red-400'}`}
+                          style={{ height: `${Math.max(height, 5)}%` }}
                         ></div>
-                        <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-nomad-800 text-[8px] px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 border border-nomad-600">
-                          {f.year}: {val > 0 ? '+' : ''}{val.toFixed(2)}B
+                        <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-nomad-800 text-[8px] px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 border border-nomad-600 shadow-xl">
+                          {f.year}: {val > 0 ? '+' : ''}{val.toFixed(0)}M
                         </div>
                       </div>
                     );
-                  })}
+                   })}
                 </div>
-                <div className="text-[9px] md:text-[10px] text-yellow-600 font-medium">
-                  Average of last {company.financials?.filter(f => f.changeInWorkingCapital !== undefined).length || '5-10'} years: {normalizedWC?.toFixed(2)}B
+                <div className="text-[9px] md:text-[10px] text-yellow-600 font-medium pt-1">
+                  5-Year Average: {normalizedWC?.toFixed(0)}M
                 </div>
               </div>
             )}
@@ -177,16 +189,23 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
 
           <div className="bg-nomad-800/50 p-4 md:p-5 rounded-lg border border-nomad-700/50 hover:border-nomad-600 transition-colors relative">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-baseline gap-2 mb-3">
-               <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500">CapEx ($B)</label>
+               <div className="flex items-center gap-2">
+                 <label className="block text-[10px] md:text-xs uppercase tracking-wider text-nomad-500">CapEx ({cur}M)</label>
+                 {normalizedCapex !== undefined && (
+                   <span className={`text-[8px] uppercase px-1 rounded border ${useNormalizedCapex ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30' : 'bg-nomad-900 text-nomad-500 border-nomad-700'}`}>
+                     {useNormalizedCapex ? '5Y Avg Active' : 'Historical Avg Available'}
+                   </span>
+                 )}
+               </div>
                <div className="flex items-center gap-2">
                  {/* Smart Suggestion Button */}
                  {suggestedPct !== undefined && (
                    <button 
                      onClick={() => setMaintenancePct(suggestedPct)}
                      className="text-[9px] md:text-[10px] bg-yellow-900/30 text-yellow-500 border border-yellow-700/50 px-2 py-0.5 rounded hover:bg-yellow-900/50 transition-colors flex items-center gap-1"
-                     title={`Based on company industry and history. Depreciation/CapEx is ${deprToCapex}%.`}
+                     title={`Greenwald estimate: capex minus the capex needed for growth (PP&E/sales × sales growth). Depreciation/CapEx is ${deprToCapex}%.`}
                    >
-                     <span className="animate-pulse">✨</span> AI Suggestion: {suggestedPct}%
+                     <span className="animate-pulse">✨</span> Suggested: {suggestedPct}%
                    </button>
                  )}
                  <div className="text-[10px] md:text-xs text-yellow-600 font-medium bg-nomad-900/30 px-2 py-1 rounded">
@@ -198,9 +217,12 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
                 <span className="text-red-500/70 mr-2">-</span>
                 <input 
                   type="number" 
-                  value={capex} 
-                  onChange={(e) => setCapex(parseFloat(e.target.value))}
-                  className="w-full bg-transparent text-lg md:text-xl text-nomad-100 font-mono focus:outline-none" 
+                  value={capex.toFixed(0)} 
+                  onChange={(e) => {
+                    setCapex(parseFloat(e.target.value) || 0);
+                    setUseNormalizedCapex(false);
+                  }}
+                  className={`w-full bg-transparent text-lg md:text-xl font-mono focus:outline-none ${useNormalizedCapex ? 'text-yellow-500' : 'text-nomad-100'}`} 
                 />
             </div>
             <input 
@@ -216,11 +238,39 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
                  Depr/CapEx: <span className="text-nomad-400">{deprToCapex}%</span>
                </span>
                <p className="text-[9px] md:text-[10px] text-nomad-500">
-                 Maint. CapEx: <span className="text-red-400 font-mono">-${maintenanceCapex.toFixed(2)}B</span>
+                 Maint. CapEx: <span className="text-red-400 font-mono">-{cur}{maintenanceCapex.toFixed(0)}M</span>
               </p>
              </div>
-          </div>
 
+            {/* Historical CapEx Chart */}
+            <div className="mt-4 pt-4 border-t border-nomad-700/30 space-y-2">
+                <div className="text-[9px] md:text-[10px] text-nomad-500 font-bold uppercase tracking-wider">Historical CapEx ({cur}M)</div>
+                <div className="flex gap-1 items-end h-10 bg-nomad-900/30 rounded p-1">
+                  {company.financials?.filter(f => f.capex !== undefined).map((f, idx) => {
+                    const val = (f.capex || 0);
+                    const allVals = company.financials?.map(x => (x.capex || 0)) || [1];
+                    const max = Math.max(...allVals, 1);
+                    const height = (val / max) * 100;
+                    return (
+                      <div key={idx} className="flex-1 h-full flex flex-col justify-end items-center group relative" title={`${f.year}`}>
+                        <div 
+                          className="w-full bg-red-500/60 rounded-t-sm transition-all hover:bg-red-400"
+                          style={{ height: `${Math.max(height, 5)}%` }}
+                        ></div>
+                        <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-nomad-800 text-[8px] px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 border border-nomad-600 shadow-xl">
+                          {f.year}: {val.toFixed(0)}M
+                        </div>
+                      </div>
+                    );
+                   })}
+                </div>
+                <div className="flex gap-1 text-[8px] text-nomad-600 font-mono">
+                  {company.financials?.filter(f => f.capex !== undefined).map((f, idx) => (
+                    <span key={idx} className="flex-1 text-center">{f.year.slice(2)}: {(f.capex || 0).toFixed(0)}</span>
+                  ))}
+                </div>
+            </div>
+          </div>
         </div>
 
         {/* Result */}
@@ -229,33 +279,33 @@ const OwnersEarningsCalculator: React.FC<Props> = ({ company, onApply, onClose }
                <div className="absolute top-0 right-0 p-20 bg-yellow-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
                
                <div className="relative z-10 space-y-1 text-[10px] md:text-xs text-nomad-400 mb-6 font-mono">
-                 <div className="flex justify-between p-1 px-2"><span>Net Income</span> <span>${netIncome.toFixed(2)}</span></div>
-                 <div className="flex justify-between p-1 px-2 text-green-400/80"><span>+ D&A</span> <span>+${depreciation.toFixed(2)}</span></div>
+                 <div className="flex justify-between p-1 px-2"><span>Net Income</span> <span>{cur}{netIncome.toFixed(0)}M</span></div>
+                 <div className="flex justify-between p-1 px-2 text-green-400/80"><span>+ D&A</span> <span>+{cur}{depreciation.toFixed(0)}M</span></div>
                  <div className="flex justify-between p-1 px-2 text-green-400/80">
                     <span>+ SBC (Add back)</span> 
-                    <span>+${sbc.toFixed(2)}</span>
+                    <span>+{cur}{sbc.toFixed(0)}M</span>
                  </div>
                  <div className="flex justify-between p-1 px-2">
                     <span>{useNormalizedWC ? '± Normalized Work. Cap' : '± Work. Cap'}</span> 
-                    <span className={useNormalizedWC ? 'text-yellow-500' : ''}>{currentWC > 0 ? '+' : ''}{currentWC.toFixed(2)}</span>
+                    <span className={useNormalizedWC ? 'text-yellow-500' : ''}>{currentWC > 0 ? '+' : ''}{currentWC.toFixed(0)}M</span>
                  </div>
                  <div className="border-t border-nomad-600 my-1 mx-2"></div>
-                 <div className="flex justify-between p-1 px-2 text-nomad-200 font-bold bg-nomad-900/40 rounded"><span>= Cash From Ops</span> <span>${cashFlowFromOps.toFixed(2)}</span></div>
+                 <div className="flex justify-between p-1 px-2 text-nomad-200 font-bold bg-nomad-900/40 rounded"><span>= Cash From Ops</span> <span>{cur}{cashFlowFromOps.toFixed(0)}M</span></div>
                  <div className="h-2"></div>
-                 <div className="flex justify-between p-1 px-2 text-red-400/80"><span>- Maint. CapEx</span> <span>-${maintenanceCapex.toFixed(2)}</span></div>
+                 <div className="flex justify-between p-1 px-2 text-red-400/80"><span>- Maint. CapEx</span> <span>-{cur}{maintenanceCapex.toFixed(0)}M</span></div>
                  <div className="flex justify-between p-1 px-2 text-red-400/80 font-medium bg-red-900/10 rounded">
                     <span>- SBC (Real Cost)</span> 
-                    <span>-${sbc.toFixed(2)}</span>
+                    <span>-{cur}{sbc.toFixed(0)}M</span>
                  </div>
                  <div className="border-t border-nomad-500 my-2 pt-2 mx-2 flex justify-between text-white font-bold text-sm md:text-base">
-                   <span>Total OE ($B)</span> <span>${ownersEarningsTotal.toFixed(2)}</span>
+                   <span>Total OE ({cur}M)</span> <span>{cur}{ownersEarningsTotal.toFixed(0)}M</span>
                  </div>
                </div>
 
                <div className="text-center relative z-10 mt-4 pt-6 border-t border-nomad-700/50">
                  <div className="text-nomad-500 text-[9px] md:text-[10px] uppercase tracking-widest mb-2">Owner's Earnings Per Share</div>
                  <div className="text-4xl md:text-5xl font-serif text-yellow-500 tracking-tight drop-shadow-lg">
-                    <span className="text-xl md:text-2xl align-top opacity-50 mr-1">$</span>
+                    <span className="text-xl md:text-2xl align-top opacity-50 mr-1">{cur}</span>
                     {ownersEarningsPerShare.toFixed(2)}
                  </div>
                </div>
